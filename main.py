@@ -1,59 +1,100 @@
+"""
+機械学習を用いて物理法則を近似し、そのモデルの重みとバイアスを見ることで新しい近似公式を見るける実験
+"""
+
 import numpy as np
 from sklearn.neural_network import MLPRegressor
 from sklearn.metrics import mean_absolute_error
-from sklearn.preprocessing import PolynomialFeatures
-from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler
 from typing import Tuple
 
 # 乱数のシードを固定（再現性確保）
 np.random.seed(42)
 
 # 訓練データ・テストデータの件数
-n_train: int = 800_000
-n_test: int = 200_000
+n_train: int = 16_000_000
+n_test: int = 4_000_000
+
+# 入力の未知数の数。（説明変数の形状の例: (n_train, n_features)）
+# objective_function の式と合わせること！
+n_features: int = 1
 
 # データセット生成時の乱数の上限・下限
-default_high: float = 1.0
-default_low: float = -1.0
-
-# モデル内部の式の精度（この値より小さい数値はゼロとみなす）
-eps: float = 1e-3
+high: float = 1000.0
+low: float = -1000.0
 
 
-def true_func(X: np.ndarray) -> np.ndarray:
+def objective_function(X: np.ndarray) -> np.ndarray:
     """
-    真の関数を計算して返す
-
-    Args:
-        X (np.ndarray): 入力データ (shape: [n, 2]) 列順は [a, m]
-
-    Returns:
-        np.ndarray: 出力データ (shape: [n, 1])
+    目的関数（真の関数）を計算して返す
+    n_features と合わせること！
     """
-    return (X[:, 0] * X[:, 1]).reshape(-1, 1)
+    # 2*x: n_features=1, -100.0 ~ 100.0, 隠れ層(2), エポック100 で収束
+    return (2 * X[:, 0]).reshape(-1, 1)
+
+    # 位置エネルギー U_g = mgh: n_features=2, 隠れ層(1, 1), エポック6000 で未収束
+    # return (X[:, 0] * 9.8 * X[:, 1]).reshape(-1, 1)
+
+    # 熱力学第一法則 Q = ΔU + W: n_features=2, 隠れ層(1, 1), エポック6000 で未収束
+    # return (X[:, 0] + X[:, 1]).reshape(-1, 1)
 
 
 def make_dataset(
-    n: int,
-    low: float = default_low,
-    high: float = default_high,
+    n: int,  # サンプル数
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     一様分布に従う乱数からデータセットを生成する。
-
-    Args:
-        n (int): サンプル数
-        low (float): 最小値（inclusive）
-        high (float): 最大値（exclusive）
-
-    Returns:
-        Tuple[np.ndarray, np.ndarray]:
-            - X: 形状 (n, 2) の説明変数 [a, m]
-            - y: true_func(X) によって生成される目的変数
     """
-    X: np.ndarray = np.random.uniform(low, high, size=(n, 2))
-    y: np.ndarray = true_func(X)
+    # 形状 (n, x_num) の説明変数
+    X: np.ndarray = np.random.uniform(low, high, size=(n, n_features))
+
+    # objective_function(X) によって生成される目的変数
+    y: np.ndarray = objective_function(X)
+
     return X, y
+
+
+def print_mlp_expression(
+    model: MLPRegressor,
+    feature_names: Tuple[str, ...],
+):
+    """
+    model.coefs_, model.intercepts_ をたどり、
+    ReLU を含むネットワークの出力式を組み立てて標準出力する。
+    """
+    coefs = model.coefs_
+    intercepts = model.intercepts_
+    n_layers = len(coefs)  # 隠れ層＋出力層の数
+
+    # 層ごとに入力名リストを更新していく
+    input_names = list(feature_names)
+
+    for layer_idx, (W, b) in enumerate(zip(coefs, intercepts)):
+        is_output_layer = layer_idx == n_layers - 1
+        n_out = W.shape[1]
+
+        # この層の出力を表す名前リスト
+        output_names = []
+        for j in range(n_out):
+            # 線形結合の文字列を作成
+            terms = []
+            for i, xname in enumerate(input_names):
+                terms.append(f"{W[i, j]:.3f}*{xname}")
+            terms.append(f"{b[j]:.3f}")
+            lin = " + ".join(terms) or "0"
+
+            if not is_output_layer:
+                # 隠れ層：ReLU
+                neuron_name = f"h{layer_idx+1}_{j+1}"
+                print(f"{neuron_name} = relu({lin})")
+                output_names.append(neuron_name)
+            else:
+                # 出力層：恒等関数 → ŷ
+                print(f"ŷ = {lin}")
+
+        # 次の層の入力名リストを更新（出力層なら不要）
+        if not is_output_layer:
+            input_names = output_names
 
 
 def main() -> None:
@@ -65,64 +106,47 @@ def main() -> None:
     # データ生成
     x_train, y_train = make_dataset(n_train)
     x_test, y_test = make_dataset(n_test)
+    x_sample, y_sample = make_dataset(1)
 
-    #  モデル定義: MLPRegressor
+    # 入力・出力を標準化
+    scaler_x = StandardScaler()
+    scaler_y = StandardScaler()
+    x_train_s = scaler_x.fit_transform(x_train)
+    y_train_s = scaler_y.fit_transform(y_train).ravel()
+    x_test_s = scaler_x.transform(x_test)
+
+    #  モデル定義と学習: MLPRegressor
     model = MLPRegressor(
-        hidden_layer_sizes=(50, 50),  # 隠れ層２層×50ユニット
         activation="relu",  # 活性化関数
-        solver="adam",  # 最適化アルゴリズム
         batch_size=1024,  # ミニバッチサイズ
-        learning_rate_init=1e-3,  # 初期学習率
-        max_iter=50,  # エポック数
-        random_state=42,
-        verbose=True,
+        hidden_layer_sizes=(2),  # 隠れ層: ユニット数（各値）は 2 以上
+        learning_rate="adaptive",
+        learning_rate_init=1e-2,  # 初期学習率
+        max_iter=16,  # エポック数
+        random_state=42,  # ランダムのシード
+        solver="adam",  # 最適化アルゴリズム
+        tol=1e-3,  # 収束許容誤差を厳しく
+        verbose=False,  # 学習の進行状況
+    )
+    model.fit(x_train_s, y_train_s)
+
+    # 予測 + スケール変換 + MAE 算出
+    y_pred_s = model.predict(x_test_s)
+    y_pred = scaler_y.inverse_transform(y_pred_s.reshape(-1, 1))
+    print(f"MAE: {mean_absolute_error(y_test, y_pred):.6f}")
+
+    # 演算の例（n=1）
+    true_sample = objective_function(x_sample)[0][0]
+    prediction_sample = model.predict(x_sample)[0]
+    error = abs(true_sample - prediction_sample)
+    print(
+        f"入力例: {x_sample[0][0]:.6f}\n",
+        f"  理論値: {true_sample:.6f}, 予測値: {prediction_sample:.6f}, 誤差: {error:.6f}",
     )
 
-    # モデル学習
-    model.fit(x_train, y_train.ravel())
-
-    # 予測・評価
-    y_pred = model.predict(x_test)
-    mae = mean_absolute_error(y_test, y_pred)
-    print(f"テストデータに対する平均絶対誤差 (MAE): {mae:.6f}")
-    if mae <= 0.04:
-        print("精度: OK")
-    else:
-        print("精度: 不十分です")
-
-    """
-    モデル出力から真の関数を近似的に再構築
-    """
-    # テストデータのサブセットを使って予測曲面を線形回帰でフィッティング
-    n_sub: int = 200_000
-    idx = np.random.choice(len(x_test), size=n_sub, replace=False)
-    X_sub = x_test[idx]
-    y_sub_pred = model.predict(X_sub)
-
-    poly = PolynomialFeatures(degree=2, interaction_only=True, include_bias=False)
-    X_poly = poly.fit_transform(X_sub)
-    lr = LinearRegression()
-    lr.fit(X_poly, y_sub_pred)
-
-    # 特徴量名と係数取得
-    feature_names = poly.get_feature_names_out(["a", "m"])
-    coefs = lr.coef_
-    intercept = lr.intercept_
-
-    # フルモデル式
-    terms = [(name.replace(" ", "*"), w) for name, w in zip(feature_names, coefs)]
-    full = " + ".join(f"{w:.6f}*{n}" for n, w in terms)
-    full = f"{full} + {intercept:.6f}"
-
-    # 省略版: 絶対値 eps 未満の項は省略
-    filtered = " + ".join(f"{w:.6f}*{n}" for n, w in terms if abs(w) >= eps)
-    if abs(intercept) >= eps:
-        filtered = f"{filtered} + {intercept:.6f}" if filtered else f"{intercept:.6f}"
-
-    print("\n【フルモデル式（近似）】")
-    print(f"  ŷ = {full}")
-    print("\n【省略版モデル式（近似）】")
-    print(f"  ŷ = {filtered}")
+    # ネットワーク式の出力
+    print("\n=== ネットワークが学習した式（ReLU込み） ===")
+    print_mlp_expression(model, feature_names=("a"))
 
 
 if __name__ == "__main__":

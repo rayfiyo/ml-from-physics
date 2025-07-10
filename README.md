@@ -9,3 +9,12 @@
 # Special thanks
 
 - AI-Newton: https://arxiv.org/abs/2504.01538
+
+# Note for Develop
+
+## After updating requirements.txt
+
+```
+pip install pipreqs
+pipreqs . --force
+```

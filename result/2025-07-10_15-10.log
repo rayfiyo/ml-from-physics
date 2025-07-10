@@ -1,0 +1,22 @@
+Iteration 1, loss = 0.00125463
+Iteration 2, loss = 0.00001354
+Iteration 3, loss = 0.00000828
+Iteration 4, loss = 0.00000678
+Iteration 5, loss = 0.00000610
+Iteration 6, loss = 0.00000578
+Iteration 7, loss = 0.00000533
+Iteration 8, loss = 0.00000504
+Iteration 9, loss = 0.00000471
+Iteration 10, loss = 0.00000461
+Iteration 11, loss = 0.00000443
+Iteration 12, loss = 0.00000423
+Iteration 13, loss = 0.00000409
+Training loss did not improve more than tol=0.000100 for 10 consecutive epochs. Stopping.
+テストデータに対する平均絶対誤差 (MAE): 0.001248
+精度: OK
+
+【フルモデル式（近似）】
+  ŷ = 0.000111*a + 0.000178*m + 0.999846*a*m + -0.000474
+
+【省略版モデル式（近似）】
+  ŷ = 0.999846*a*m
